@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:chethanafm/utils/theme/app_colors.dart';
@@ -170,6 +171,7 @@ class _SignupViewState extends State<SignupView> {
                   borderColor: AppColors.borderColor.withOpacity(0.8),
                   validator: (val) => val != null && val.isNotEmpty ? null : "Please enter your name",
                 ),
+                const SizedBox(height: 16),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -244,7 +246,10 @@ class _SignupViewState extends State<SignupView> {
                         controller: _phoneController,
                         label: "Phone Number",
                         hint: "Phone Number",
-                        keyboardType: TextInputType.phone,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        maxLength: getPhoneNumberMaxLength(authViewModel.selectedCountryCode),
                         showLabel: false,
                         showPrefixIcon: false,
                         borderRadius: 8,

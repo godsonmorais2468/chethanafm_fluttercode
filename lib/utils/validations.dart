@@ -1,7 +1,7 @@
 // import 'package:intl/intl.dart';
 
 import 'package:email_validator/email_validator.dart';
-
+import 'package:phone_numbers_parser/phone_numbers_parser.dart';
 extension TextUtilsStringExtension on String? {
   /// Returns true if string is not :
   /// - null
@@ -19,62 +19,47 @@ extension TextUtilsStringExtension on String? {
   bool get isValidGST => this != null && this!.trim().length == 15;
 }
 
+
 String? validatePhoneNumber(String? value, String? countryCode) {
   if (value == null || value.trim().isEmpty) {
-    return "Please enter phone number";
+    return "Please enter your phone number.";
   }
   if (countryCode == null || countryCode.isEmpty) {
-    return "Please select a country code";
+    return "Please select a country code.";
   }
-  final cleanPhone = value.trim();
-  switch (countryCode) {
-    case "+91":
-      if (cleanPhone.length != 10) {
-        return "Phone number must be exactly 10 digits";
-      }
-      if (!RegExp(r'^[6-9]').hasMatch(cleanPhone)) {
-        return "India phone number must start with 6, 7, 8, or 9";
-      }
-      break;
-    case "+1":
-      if (cleanPhone.length != 10) {
-        return "Phone number must be exactly 10 digits";
-      }
-      break;
-    case "+44":
-      if (cleanPhone.length != 10) {
-        return "Phone number must be exactly 10 digits";
-      }
-      break;
-    case "+61":
-      if (cleanPhone.length != 9) {
-        return "Phone number must be exactly 9 digits";
-      }
-      break;
-    case "+971":
-      if (cleanPhone.length != 9) {
-        return "Phone number must be exactly 9 digits";
-      }
-      break;
-    case "+966":
-      if (cleanPhone.length != 9) {
-        return "Phone number must be exactly 9 digits";
-      }
-      break;
-    case "+65":
-      if (cleanPhone.length != 8) {
-        return "Phone number must be exactly 8 digits";
-      }
-      if (!RegExp(r'^[689]').hasMatch(cleanPhone)) {
-        return "Singapore phone number must start with 6, 8, or 9";
-      }
-      break;
-    default:
-      if (cleanPhone.isEmpty) {
-        return "Please enter phone number";
-      }
+  final cleanPhone = value.replaceAll(RegExp(r'\D'), '');
+  if (cleanPhone.isEmpty) {
+    return "Please enter a valid phone number.";
   }
+
+  try {
+    final fullNumber = '$countryCode$cleanPhone';
+    final parsed = PhoneNumber.parse(fullNumber);
+    
+    if (!parsed.isValid()) {
+      return "Phone number length is invalid for the selected country.";
+    }
+  } catch (e) {
+    return "Invalid mobile number.";
+  }
+  
   return null;
+}
+
+int getPhoneNumberMaxLength(String? countryCode) {
+  switch (countryCode) {
+    case '+91': return 10;
+    case '+1': return 10;
+    case '+44': return 10;
+    case '+61': return 9;
+    case '+971': return 9;
+    case '+966': return 9;
+    case '+65': return 8;
+    case '+60': return 10;
+    case '+33': return 9;
+    case '+49': return 11;
+    default: return 15;
+  }
 }
 
 

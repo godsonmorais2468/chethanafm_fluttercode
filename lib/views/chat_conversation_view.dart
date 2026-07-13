@@ -604,7 +604,7 @@ class _ChatConversationViewState extends State<ChatConversationView> {
                 // Message Input Field
                 SafeArea(
                   child: Container(
-                    margin: EdgeInsets.fromLTRB(16.w, 4.h, 16.w, 12.h),
+                    margin: EdgeInsets.fromLTRB(16.w, 4.h, 16.w, 90.h),
                     padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 6.h),
                     decoration: BoxDecoration(
                       color: Colors.white,

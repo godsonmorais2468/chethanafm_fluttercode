@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:chethanafm/utils/theme/app_colors.dart';
@@ -167,7 +168,10 @@ class _ForgotPasswordViewState extends State<ForgotPasswordView> {
                         controller: _phoneController,
                         label: "Phone Number",
                         hint: "Phone Number",
-                        keyboardType: TextInputType.phone,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        maxLength: getPhoneNumberMaxLength(authViewModel.selectedCountryCode),
                         showLabel: false,
                         showPrefixIcon: false,
                         borderRadius: 8,

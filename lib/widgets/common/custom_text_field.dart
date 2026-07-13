@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:chethanafm/utils/theme/app_colors.dart';
 
@@ -15,6 +16,10 @@ class CustomTextField extends StatelessWidget {
   final bool showPrefixIcon;
   final Color? borderColor;
   final double borderRadius;
+  final List<TextInputFormatter>? inputFormatters;
+  final AutovalidateMode? autovalidateMode;
+  final void Function(String)? onChanged;
+  final int? maxLength;
 
   const CustomTextField({
     super.key,
@@ -30,6 +35,10 @@ class CustomTextField extends StatelessWidget {
     this.showPrefixIcon = true,
     this.borderColor,
     this.borderRadius = 12,
+    this.inputFormatters,
+    this.autovalidateMode,
+    this.onChanged,
+    this.maxLength,
   });
 
   @override
@@ -54,7 +63,13 @@ class CustomTextField extends StatelessWidget {
           keyboardType: keyboardType,
           obscureText: obscureText,
           validator: validator,
+          inputFormatters: inputFormatters,
+          autovalidateMode: autovalidateMode,
+          onChanged: onChanged,
+          maxLength: maxLength,
           decoration: InputDecoration(
+            counterText: "",
+            errorMaxLines: 3,
             hintText: hint,
             hintStyle: GoogleFonts.outfit(
               color: AppColors.textSecondary.withOpacity(0.6),
