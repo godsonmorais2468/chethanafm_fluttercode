@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "783088642383",
+    "project_id": "chethana-fm",
+    "storage_bucket": "chethana-fm.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:783088642383:android:97ce2bd51a41a137acfd3a",
+        "android_client_info": {
+          "package_name": "com.chethanaFm"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAv8NDAxc34Bri2dl35yV_FzwnZbUjXBhQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
