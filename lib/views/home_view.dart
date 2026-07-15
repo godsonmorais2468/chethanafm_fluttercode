@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -22,6 +23,9 @@ class HomeView extends StatefulWidget {
 }
 
 class _HomeViewState extends State<HomeView> {
+  Timer? _refreshTimer;
+  bool _isRefreshing = false;
+
   @override
   void initState() {
     super.initState();
@@ -29,19 +33,40 @@ class _HomeViewState extends State<HomeView> {
       context.read<HomeViewModel>().fetchLiveProgram();
       context.read<ScheduleViewModel>().fetchSchedule();
     });
+    _startTimer();
   }
 
-  /// Parse a "HH:mm:ss" time string to total minutes from midnight.
-  int _parseHHmmss(String timeStr) {
-    try {
-      final parts = timeStr.split(':');
-      final h = int.parse(parts[0]);
-      final m = int.parse(parts[1]);
-      return h * 60 + m;
-    } catch (_) {
-      return 0;
-    }
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
+
+  void _startTimer() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_isRefreshing) return;
+      _isRefreshing = true;
+      try {
+        await context.read<HomeViewModel>().refreshLiveProgram();
+        if (!mounted) return;
+        await context.read<RadioViewModel>().refreshLiveProgramSilent();
+        if (!mounted) return;
+        await context.read<ScheduleViewModel>().refreshSchedule();
+      } catch (e) {
+        debugPrint("HomeView refresh error: $e");
+      } finally {
+        _isRefreshing = false;
+      }
+    });
+  }
+
+
+
 
   /// Format "HH:mm:ss" to "h:mm AM/PM" (e.g. "6:00 AM").
   String _formatTime(String timeStr) {
@@ -69,28 +94,10 @@ class _HomeViewState extends State<HomeView> {
 
     final liveProgram = homeViewModel.liveProgram;
 
-    // Map abbreviated day string for ProgramSchedule.day (backend uses "MON", "TUE", etc.)
-    final dayAbbrevs = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
-    final todayDayStr = dayAbbrevs[DateTime.now().weekday - 1];
-    final currentMinutes = DateTime.now().hour * 60 + DateTime.now().minute;
+    final ProgramSchedule? nextShow = scheduleViewModel.nextUpcomingShow;
+    final List<ProgramSchedule> remainingSchedules = scheduleViewModel.remainingUpcomingShows;
 
-    // Filter today's schedules from allSchedules (ProgramSchedule list)
-    final todaySchedules = scheduleViewModel.allSchedules
-        .where((s) => s.day.toUpperCase() == todayDayStr)
-        .toList();
-
-    // Upcoming shows = shows that haven't started yet (startTime > now)
-    final upcomingSchedules = todaySchedules
-        .where((s) => _parseHHmmss(s.startTime) > currentMinutes)
-        .toList();
-
-    // The very next show
-    ProgramSchedule? nextShow =
-        upcomingSchedules.isNotEmpty ? upcomingSchedules.first : null;
-
-    // Minutes until next show starts
-    final int minsUntilNext =
-        nextShow != null ? _parseHHmmss(nextShow.startTime) - currentMinutes : 9999;
+    final int minsUntilNext = scheduleViewModel.getMinutesUntilNextShow(nextShow);
 
     // Show badge only if ≤10 mins away
     final bool showNextBadge = minsUntilNext <= 10;
@@ -246,7 +253,7 @@ class _HomeViewState extends State<HomeView> {
 
             Padding(
               padding: EdgeInsets.symmetric(horizontal: 20.w),
-              child: _buildTodayLineup(context, upcomingSchedules),
+              child: _buildTodayLineup(context, remainingSchedules),
             ),
 
             // Space for bottom floating navigation bar
@@ -654,7 +661,7 @@ class _HomeViewState extends State<HomeView> {
   }
 
   Widget _buildTodayLineup(
-      BuildContext context, List<ProgramSchedule> upcomingSchedules) {
+      BuildContext context, List<ProgramSchedule> remainingSchedules) {
     if (scheduleViewModel(context).isLoading) {
       return const Center(
         child: Padding(
@@ -664,7 +671,7 @@ class _HomeViewState extends State<HomeView> {
       );
     }
 
-    if (upcomingSchedules.isEmpty) {
+    if (remainingSchedules.isEmpty) {
       return SizedBox(
         width: double.infinity,
         child: Padding(
@@ -680,7 +687,7 @@ class _HomeViewState extends State<HomeView> {
               ),
               SizedBox(height: 10.h),
               Text(
-                "No more shows for today.",
+                "No more upcoming shows today.",
                 textAlign: TextAlign.center,
                 style: GoogleFonts.outfit(
                   fontSize: 14.sp,
@@ -703,7 +710,7 @@ class _HomeViewState extends State<HomeView> {
       );
     }
 
-    final displayItems = upcomingSchedules.take(3).toList();
+    final displayItems = remainingSchedules.take(3).toList();
 
     return ListView.separated(
       physics: const NeverScrollableScrollPhysics(),

@@ -26,10 +26,12 @@ class ChatConversationView extends StatefulWidget {
 
 class _ChatConversationViewState extends State<ChatConversationView> {
   final TextEditingController _messageController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+  ScrollController? _innerController;
   final FocusNode _focusNode = FocusNode();
   Timer? _typingTimer;
   bool _isTypingLocal = false;
+  bool _isFirstLoad = true;
+  int _prevDocCount = 0;
 
   @override
   void initState() {
@@ -39,9 +41,22 @@ class _ChatConversationViewState extends State<ChatConversationView> {
   }
 
   @override
+  void didUpdateWidget(covariant ChatConversationView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.roomId != widget.roomId) {
+      _isFirstLoad = true;
+      _prevDocCount = 0;
+      _markRead();
+      final currentUserId = context.read<AuthViewModel>().userId.toString();
+      context.read<ChatViewModel>().setTypingStatus(oldWidget.roomId, currentUserId, false);
+      _isTypingLocal = false;
+    }
+  }
+
+
+  @override
   void dispose() {
     _messageController.dispose();
-    _scrollController.dispose();
     _focusNode.removeListener(_onFocusChange);
     _focusNode.dispose();
     _typingTimer?.cancel();
@@ -62,11 +77,11 @@ class _ChatConversationViewState extends State<ChatConversationView> {
   }
 
   void _scrollToBottom() {
-    if (_scrollController.hasClients) {
+    if (_innerController?.hasClients ?? false) {
       Future.delayed(const Duration(milliseconds: 100), () {
-        if (_scrollController.hasClients) {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
+        if (_innerController?.hasClients ?? false) {
+          _innerController!.animateTo(
+            _innerController!.position.maxScrollExtent,
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
           );
@@ -260,8 +275,8 @@ class _ChatConversationViewState extends State<ChatConversationView> {
     final radioViewModel = context.watch<RadioViewModel>();
     final currentUserId = authViewModel.userId.toString();
     
-    final programTitle = radioViewModel.liveProgram?.title ?? "Midnight Pulse";
-    final programRj = radioViewModel.liveProgram?.rj ?? "DJ Shane Martinez";
+    final programTitle = widget.otherUser['name'] as String? ?? radioViewModel.liveProgram?.title ?? "Midnight Pulse";
+    final programRj = widget.otherUser['rj'] as String? ?? radioViewModel.liveProgram?.rj ?? "DJ Shane Martinez";
 
     return Scaffold(
       backgroundColor: const Color(0xFFF3F4F6),
@@ -379,11 +394,14 @@ class _ChatConversationViewState extends State<ChatConversationView> {
             ),
           ];
         },
-        body: Stack(
-          children: [
-            // Background circles/dots patterns
-            ..._buildBackgroundCircles(),
-            // Main content
+        body: Builder(
+          builder: (innerContext) {
+            _innerController = PrimaryScrollController.of(innerContext);
+            return Stack(
+              children: [
+                // Background circles/dots patterns
+                ..._buildBackgroundCircles(),
+                // Main content
             Column(
               children: [
                 Expanded(
@@ -440,10 +458,28 @@ class _ChatConversationViewState extends State<ChatConversationView> {
                         );
                       }
 
-                      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+                      if (docs.isNotEmpty) {
+                        if (_isFirstLoad) {
+                          _isFirstLoad = false;
+                          _prevDocCount = docs.length;
+                          WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+                        } else if (docs.length > _prevDocCount) {
+                          _prevDocCount = docs.length;
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (_innerController?.hasClients ?? false) {
+                              final pos = _innerController!.position;
+                              if (pos.pixels >= pos.maxScrollExtent - 250.0) {
+                                _scrollToBottom();
+                              }
+                            }
+                          });
+                        } else {
+                          _prevDocCount = docs.length;
+                        }
+                      }
 
                       return ListView.builder(
-                        controller: _scrollController,
+                        controller: _innerController,
                         padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
                         itemCount: docs.length,
                         itemBuilder: (context, index) {
@@ -673,8 +709,10 @@ class _ChatConversationViewState extends State<ChatConversationView> {
                   ),
                 ),
               ],
-            ),
-          ],
+            )
+            ]
+            );
+          },
         ),
       ),
     );

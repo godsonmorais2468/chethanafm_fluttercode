@@ -38,4 +38,27 @@ class HomeViewModel extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<void> refreshLiveProgram() async {
+    try {
+      final result = await _apiClient.getLiveProgram();
+      if (result.status == Status.success && result.data != null) {
+        final newProgram = result.data;
+        final changed = _liveProgram?.id != newProgram?.id ||
+            _liveProgram?.title != newProgram?.title ||
+            _liveProgram?.rj != newProgram?.rj ||
+            _liveProgram?.streamUrl != newProgram?.streamUrl ||
+            _liveProgram?.isLive != newProgram?.isLive;
+
+        if (changed) {
+          _liveProgram = newProgram;
+          _errorMessage = null;
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint("Silent live program refresh failed: $e");
+    }
+  }
 }
+

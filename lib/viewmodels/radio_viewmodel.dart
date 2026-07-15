@@ -135,6 +135,65 @@ class RadioViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> refreshLiveProgramSilent() async {
+    try {
+      final result = await _apiClient.getLiveProgram();
+      if (result.status == Status.success && result.data != null) {
+        final newProgram = result.data!;
+        
+        final programChanged = _liveProgram == null || 
+                               _liveProgram!.id != newProgram.id || 
+                               _liveProgram!.title != newProgram.title ||
+                               _liveProgram!.rj != newProgram.rj ||
+                               _liveProgram!.streamUrl != newProgram.streamUrl;
+                               
+        if (programChanged) {
+          _liveProgram = newProgram;
+          _mediaItem = MediaItem(
+            id: _liveProgram!.id.toString(),
+            album: 'Chethana FM',
+            title: _liveProgram!.title,
+            artist: _liveProgram!.rj,
+            artUri: Uri.parse(Images.splashLogo),
+          );
+
+          final url = _liveProgram!.streamUrl;
+          if (url.isNotEmpty) {
+            if (_currentStreamUrl != url) {
+              _currentStreamUrl = url;
+              _playlist = ConcatenatingAudioSource(children: [
+                ClippingAudioSource(
+                  child: AudioSource.uri(Uri.parse(url)),
+                  tag: _mediaItem!,
+                ),
+              ]);
+              if (!_isPlaying) {
+                await _connectStream();
+              }
+            } else {
+              _playlist = ConcatenatingAudioSource(children: [
+                ClippingAudioSource(
+                  child: AudioSource.uri(Uri.parse(url)),
+                  tag: _mediaItem!,
+                ),
+              ]);
+              if (!_isPlaying) {
+                await _connectStream();
+              }
+            }
+          } else {
+            _currentStreamUrl = null;
+            _playlist = null;
+          }
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      Debug.trace("RadioViewModel silent refresh error: $e", isError: true);
+    }
+  }
+
+
   Future<void> _connectStream() async {
     _initPlayer();
     if (_playlist == null) return;

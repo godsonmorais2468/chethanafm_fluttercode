@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -15,13 +16,43 @@ class ChatView extends StatefulWidget {
 }
 
 class _ChatViewState extends State<ChatView> {
+  Timer? _refreshTimer;
+  bool _isRefreshing = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<HomeViewModel>().fetchLiveProgram();
     });
+    _startTimer();
   }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startTimer() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_isRefreshing) return;
+      _isRefreshing = true;
+      try {
+        await context.read<HomeViewModel>().refreshLiveProgram();
+      } catch (e) {
+        debugPrint("ChatView refresh error: $e");
+      } finally {
+        _isRefreshing = false;
+      }
+    });
+  }
+
 
   @override
   Widget build(BuildContext context) {

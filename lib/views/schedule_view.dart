@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -25,6 +26,9 @@ class _ScheduleViewState extends State<ScheduleView>
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
+  Timer? _refreshTimer;
+  bool _isRefreshing = false;
+
   @override
   void initState() {
     super.initState();
@@ -49,23 +53,37 @@ class _ScheduleViewState extends State<ScheduleView>
       }
       scheduleVM.fetchSchedule(); // fetch dynamic schedule API
     });
+    _startTimer();
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
   }
 
-  /// Convert "HH:mm:ss" to total minutes from midnight.
-  int _toMinutes(String t) {
-    try {
-      final p = t.split(':');
-      return int.parse(p[0]) * 60 + int.parse(p[1]);
-    } catch (_) {
-      return 0;
-    }
+  void _startTimer() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_isRefreshing) return;
+      _isRefreshing = true;
+      try {
+        await context.read<ScheduleViewModel>().refreshSchedule();
+      } catch (e) {
+        debugPrint("ScheduleView refresh error: $e");
+      } finally {
+        _isRefreshing = false;
+      }
+    });
   }
+
+
+
 
   /// Format "HH:mm:ss" → "h:mm AM/PM".
   String _fmt(String t) {
@@ -78,10 +96,7 @@ class _ScheduleViewState extends State<ScheduleView>
 
   /// Is this schedule item currently on air? Only meaningful when selectedDay == today.
   bool _isOnAir(ProgramSchedule s, String selectedDay) {
-    final today = DateFormat('E').format(DateTime.now());
-    if (selectedDay.toLowerCase() != today.toLowerCase()) return false;
-    final now = DateTime.now().hour * 60 + DateTime.now().minute;
-    return _toMinutes(s.startTime) <= now && now < _toMinutes(s.endTime);
+    return context.read<ScheduleViewModel>().isOnAir(s, selectedDay);
   }
 
   Widget _buildAppbarBackgroundPatterns() {
@@ -290,16 +305,8 @@ class _ScheduleViewState extends State<ScheduleView>
               );
             }
   
-            // Split into on-air and the rest
-            final liveShows = dayPrograms
-                .where((s) => _isOnAir(s, scheduleViewModel.selectedDay))
-                .toList();
-            final otherShows = dayPrograms
-                .where((s) => !_isOnAir(s, scheduleViewModel.selectedDay))
-                .toList();
-  
-            // Build combined list: live first, then others
-            final combined = [...liveShows, ...otherShows];
+          // We don't split into live and other to keep chronological order.
+          final combined = dayPrograms;
   
             return ListView.builder(
               padding:
