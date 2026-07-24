@@ -11,11 +11,25 @@ import 'package:chethanafm/utils/debug.dart';
 import 'package:chethanafm/utils/images.dart';
 import 'package:chethanafm/viewmodels/auth_viewmodel.dart';
 
+enum RadioPlaybackState {
+  idle,
+  connecting,
+  buffering,
+  playing,
+  paused,
+  stopped,
+  reconnecting,
+  error,
+  completed,
+}
+
 class RadioViewModel extends ChangeNotifier {
   final ApiClient _apiClient;
   AudioPlayer? _player;
   
   LiveProgram? _liveProgram;
+  RadioPlaybackState _playbackState = RadioPlaybackState.idle;
+  String? _errorMessage;
   bool _isPlaying = false;
   bool _isBuffering = false;
   double _volume = 1.0;
@@ -23,6 +37,13 @@ class RadioViewModel extends ChangeNotifier {
   MediaItem? _mediaItem;
   ConcatenatingAudioSource? _playlist;
   String? _currentStreamUrl;
+
+  int _retryCount = 0;
+  Timer? _reconnectTimer;
+  bool _isReconnecting = false;
+  bool _wasPlayingBeforeInterruption = false;
+  bool _userStopped = true;
+  bool _preloaded = false;
 
   StreamSubscription<PlayerState>? _playerStateSubscription;
   StreamSubscription<double>? _volumeSubscription;
@@ -38,12 +59,32 @@ class RadioViewModel extends ChangeNotifier {
   void _initPlayer() {
     if (_player != null) return;
     _player = AudioPlayer();
+    _player!.setAutomaticallyWaitsToMinimizeStalling(false);
     _setupAudioListeners();
     _setupAudioSession();
   }
 
+  Future<void> _preloadStream(String url) async {
+    if (_preloaded) return;
+    _initPlayer();
+    try {
+      _preloaded = true;
+      Debug.trace("Preloading stream URL: $url");
+      await _player?.setUrl(
+        url,
+        initialPosition: Duration.zero,
+        tag: _mediaItem,
+      );
+    } catch (e) {
+      _preloaded = false;
+      Debug.trace("Preload error: $e", isError: true);
+    }
+  }
+
   AudioPlayer? get player => _player;
   LiveProgram? get liveProgram => _liveProgram;
+  RadioPlaybackState get playbackState => _playbackState;
+  String? get errorMessage => _errorMessage;
   bool get isPlaying => _isPlaying;
   bool get isBuffering => _isBuffering;
   double get volume => _volume;
@@ -57,16 +98,96 @@ class RadioViewModel extends ChangeNotifier {
     super.dispose();
   }
 
+  void _updatePlaybackState(RadioPlaybackState newState, {String? errorMessage}) {
+    if (_playbackState == newState && _errorMessage == errorMessage) return;
+    _playbackState = newState;
+    _errorMessage = errorMessage;
+    _isPlaying = newState == RadioPlaybackState.playing;
+    _isBuffering = newState == RadioPlaybackState.connecting ||
+                   newState == RadioPlaybackState.buffering ||
+                   newState == RadioPlaybackState.reconnecting;
+
+    switch (newState) {
+      case RadioPlaybackState.idle:
+        Debug.trace('Radio state: Idle');
+        break;
+      case RadioPlaybackState.connecting:
+        Debug.trace('Connecting...');
+        break;
+      case RadioPlaybackState.buffering:
+        Debug.trace('Buffering...');
+        break;
+      case RadioPlaybackState.playing:
+        if (_retryCount > 0) {
+          Debug.trace('Recovered');
+        } else {
+          Debug.trace('Playing...');
+        }
+        break;
+      case RadioPlaybackState.paused:
+        Debug.trace('Radio state: Paused');
+        break;
+      case RadioPlaybackState.stopped:
+        Debug.trace('Radio state: Stopped');
+        break;
+      case RadioPlaybackState.reconnecting:
+        Debug.trace('Reconnecting... (Attempt $_retryCount)');
+        break;
+      case RadioPlaybackState.error:
+        Debug.trace('Playback Error: ${errorMessage ?? "Unknown error"}', isError: true);
+        break;
+      case RadioPlaybackState.completed:
+        Debug.trace('Radio state: Completed');
+        break;
+    }
+    notifyListeners();
+  }
+
   void _setupAudioListeners() {
     final p = _player;
     if (p == null) return;
 
     _playerStateSubscription?.cancel();
     _playerStateSubscription = p.playerStateStream.listen((state) {
-      _isPlaying = state.playing;
-      _isBuffering = state.processingState == ProcessingState.loading ||
-                     state.processingState == ProcessingState.buffering;
-      notifyListeners();
+      if (_userStopped) return;
+
+      final processingState = state.processingState;
+      final playing = state.playing;
+
+      if (processingState == ProcessingState.loading) {
+        if (!_isReconnecting) {
+          _updatePlaybackState(RadioPlaybackState.connecting);
+        }
+      } else if (processingState == ProcessingState.buffering) {
+        if (playing) {
+          // If we were already playing, keep state as playing to avoid showing infinite loading spinner
+          if (_playbackState == RadioPlaybackState.playing) {
+            // Keep playing state
+          } else if (!_isReconnecting) {
+            _updatePlaybackState(RadioPlaybackState.buffering);
+          }
+        } else {
+          if (!_isReconnecting) {
+            _updatePlaybackState(RadioPlaybackState.connecting);
+          }
+        }
+      } else if (processingState == ProcessingState.ready) {
+        if (playing) {
+          _retryCount = 0;
+          _isReconnecting = false;
+          _updatePlaybackState(RadioPlaybackState.playing);
+        } else {
+          _updatePlaybackState(RadioPlaybackState.paused);
+        }
+      } else if (processingState == ProcessingState.completed) {
+        if (!_userStopped && _currentStreamUrl != null) {
+          _triggerAutoReconnect();
+        } else {
+          _updatePlaybackState(RadioPlaybackState.completed);
+        }
+      } else if (processingState == ProcessingState.idle) {
+        _updatePlaybackState(RadioPlaybackState.stopped);
+      }
     });
 
     _volumeSubscription?.cancel();
@@ -77,24 +198,44 @@ class RadioViewModel extends ChangeNotifier {
 
     _playbackEventSubscription?.cancel();
     _playbackEventSubscription = p.playbackEventStream.listen((event) {
-      // Stream events logged/processed if needed
+      // Event processed
     }, onError: (Object e, StackTrace st) {
-      Debug.trace("Playback stream error: $e", isError: true);
+      if (!_userStopped) {
+        Debug.trace("Playback stream error: $e", isError: true);
+        _handleStreamError(e);
+      }
     });
   }
 
   Future<void> _setupAudioSession() async {
     final session = await AudioSession.instance;
-    await session.configure(AudioSessionConfiguration.music());
+    await session.configure(const AudioSessionConfiguration.music());
 
     _interruptionSubscription?.cancel();
     _interruptionSubscription = session.interruptionEventStream.listen((event) {
       Debug.trace('Radio interruption event: ${event.type}');
       if (event.begin) {
-        pause();
+        switch (event.type) {
+          case AudioInterruptionType.duck:
+          case AudioInterruptionType.pause:
+          case AudioInterruptionType.unknown:
+            _wasPlayingBeforeInterruption = isPlaying && !_userStopped;
+            if (_wasPlayingBeforeInterruption) {
+              pause();
+            }
+            break;
+        }
       } else {
-        // Interruption ended, reconnect and resume
-        _connectStream();
+        switch (event.type) {
+          case AudioInterruptionType.duck:
+          case AudioInterruptionType.pause:
+          case AudioInterruptionType.unknown:
+            if (_wasPlayingBeforeInterruption && !_userStopped) {
+              _wasPlayingBeforeInterruption = false;
+              play();
+            }
+            break;
+        }
       }
     });
   }
@@ -113,6 +254,9 @@ class RadioViewModel extends ChangeNotifier {
 
       final url = _liveProgram!.streamUrl;
       if (url.isNotEmpty) {
+        if (_currentStreamUrl != url) {
+          _preloaded = false;
+        }
         _currentStreamUrl = url;
         _playlist = ConcatenatingAudioSource(children: [
           ClippingAudioSource(
@@ -120,17 +264,24 @@ class RadioViewModel extends ChangeNotifier {
             tag: _mediaItem!,
           ),
         ]);
-        await _connectStream();
+        if (_isPlaying) {
+          await _connectStream(autoPlay: true);
+        } else {
+          _preloadStream(url);
+        }
       } else {
         _currentStreamUrl = null;
         _playlist = null;
+        _preloaded = false;
+        _updatePlaybackState(RadioPlaybackState.idle);
       }
     } else {
-      // In case of API failure or offline state, disable playback URL
       _liveProgram = null;
       _mediaItem = null;
       _playlist = null;
       _currentStreamUrl = null;
+      _preloaded = false;
+      _updatePlaybackState(RadioPlaybackState.idle);
     }
     notifyListeners();
   }
@@ -160,30 +311,19 @@ class RadioViewModel extends ChangeNotifier {
           final url = _liveProgram!.streamUrl;
           if (url.isNotEmpty) {
             if (_currentStreamUrl != url) {
-              _currentStreamUrl = url;
-              _playlist = ConcatenatingAudioSource(children: [
-                ClippingAudioSource(
-                  child: AudioSource.uri(Uri.parse(url)),
-                  tag: _mediaItem!,
-                ),
-              ]);
-              if (!_isPlaying) {
-                await _connectStream();
-              }
+              _preloaded = false;
+            }
+            _currentStreamUrl = url;
+            if (_isPlaying) {
+              await _connectStream(autoPlay: true);
             } else {
-              _playlist = ConcatenatingAudioSource(children: [
-                ClippingAudioSource(
-                  child: AudioSource.uri(Uri.parse(url)),
-                  tag: _mediaItem!,
-                ),
-              ]);
-              if (!_isPlaying) {
-                await _connectStream();
-              }
+              _preloadStream(url);
             }
           } else {
             _currentStreamUrl = null;
             _playlist = null;
+            _preloaded = false;
+            _updatePlaybackState(RadioPlaybackState.idle);
           }
           notifyListeners();
         }
@@ -193,45 +333,138 @@ class RadioViewModel extends ChangeNotifier {
     }
   }
 
-
-  Future<void> _connectStream() async {
+  Future<void> _connectStream({bool autoPlay = false}) async {
     _initPlayer();
-    if (_playlist == null) return;
+    if (_currentStreamUrl == null || _currentStreamUrl!.isEmpty) return;
     try {
-      await _player?.setAudioSource(_playlist!, preload: false);
-      await _player?.setCanUseNetworkResourcesForLiveStreamingWhilePaused(true);
+      _updatePlaybackState(RadioPlaybackState.connecting);
+      await _player?.setUrl(
+        _currentStreamUrl!,
+        initialPosition: Duration.zero,
+        tag: _mediaItem,
+      );
+      if (_userStopped) return;
+      await _player?.setAutomaticallyWaitsToMinimizeStalling(false);
+      if (autoPlay && !_userStopped) {
+        await _player?.play();
+      }
     } catch (e, stackTrace) {
+      if (_userStopped) return;
       Debug.trace("Error loading audio stream: $e", isError: true);
       Debug.trace(stackTrace);
+      _handleStreamError(e);
+    }
+  }
+
+  void _triggerAutoReconnect() {
+    if (_userStopped || _currentStreamUrl == null || _currentStreamUrl!.isEmpty) {
+      return;
+    }
+    _reconnectTimer?.cancel();
+    
+    if (_retryCount < 3) {
+      _retryCount++;
+      _isReconnecting = true;
+      _updatePlaybackState(RadioPlaybackState.reconnecting);
+
+      final delays = [
+        const Duration(seconds: 2),
+        const Duration(seconds: 5),
+        const Duration(seconds: 10),
+      ];
+      final delay = delays[(_retryCount - 1).clamp(0, delays.length - 1)];
+
+      _reconnectTimer = Timer(delay, () async {
+        if (_userStopped) return;
+        try {
+          await _connectStream(autoPlay: true);
+          _isReconnecting = false;
+        } catch (e) {
+          _isReconnecting = false;
+          _triggerAutoReconnect();
+        }
+      });
+    } else {
+      _isReconnecting = false;
+      _updatePlaybackState(
+        RadioPlaybackState.error,
+        errorMessage: "Unable to connect to the live stream. Please check your internet connection and try again.",
+      );
+    }
+  }
+
+  void _handleStreamError(Object error) {
+    if (_userStopped) return;
+    if (_retryCount < 3) {
+      _triggerAutoReconnect();
+    } else {
+      _updatePlaybackState(
+        RadioPlaybackState.error,
+        errorMessage: "Unable to connect to the live stream. Please check your internet connection and try again.",
+      );
     }
   }
 
   Future<void> play() async {
+    _userStopped = false;
     _initPlayer();
     if (!isPlaybackEnabled) {
       Debug.trace("Playback request ignored: no valid stream URL loaded.");
       return;
     }
-    if (_player != null && _player!.audioSource == null && _playlist != null) {
-      await _connectStream();
+    _reconnectTimer?.cancel();
+    if (_playbackState == RadioPlaybackState.error) {
+      _retryCount = 0;
     }
-    await _player?.play();
+    try {
+      _updatePlaybackState(RadioPlaybackState.connecting);
+      if (!_preloaded) {
+        await _player?.setUrl(
+          _currentStreamUrl!,
+          initialPosition: Duration.zero,
+          tag: _mediaItem,
+        );
+        _preloaded = true;
+      }
+      if (_userStopped) return;
+      await _player?.setAutomaticallyWaitsToMinimizeStalling(false);
+      if (_userStopped) return;
+      await _player?.play();
+    } catch (e) {
+      if (_userStopped) return;
+      Debug.trace("Play error: $e", isError: true);
+      _handleStreamError(e);
+    }
   }
 
   Future<void> pause() async {
-    await _player?.pause();
+    _userStopped = true;
+    _preloaded = false;
+    _reconnectTimer?.cancel();
+    _isReconnecting = false;
+    _updatePlaybackState(RadioPlaybackState.paused);
+    try {
+      _player?.stop();
+    } catch (e) {
+      Debug.trace("Error pausing player: $e", isError: true);
+    }
   }
 
   Future<void> togglePlay() async {
     _initPlayer();
     if (!isPlaybackEnabled) {
-      Debug.trace("Playback request ignored: no valid stream URL loaded.");
-      return;
+      if (_liveProgram != null && _liveProgram!.streamUrl.isNotEmpty) {
+        await updateStreamUrl(
+          _liveProgram!.streamUrl,
+          title: _liveProgram!.title,
+          rj: _liveProgram!.rj,
+        );
+      } else {
+        Debug.trace("Playback request ignored: no valid stream URL loaded.");
+        return;
+      }
     }
-    if (_player != null && _player!.audioSource == null && _playlist != null) {
-      await _connectStream();
-    }
-    if (_player?.playing ?? false) {
+    if (_isPlaying) {
       await pause();
     } else {
       await play();
@@ -243,11 +476,14 @@ class RadioViewModel extends ChangeNotifier {
       _currentStreamUrl = null;
       _playlist = null;
       _mediaItem = null;
-      notifyListeners();
+      _preloaded = false;
+      _updatePlaybackState(RadioPlaybackState.idle);
       return;
     }
     if (_currentStreamUrl == url) return;
+
     _currentStreamUrl = url;
+    _preloaded = false;
     
     _mediaItem = MediaItem(
       id: url,
@@ -264,7 +500,11 @@ class RadioViewModel extends ChangeNotifier {
       ),
     ]);
 
-    await _connectStream();
+    if (_isPlaying) {
+      await _connectStream(autoPlay: true);
+    } else {
+      _preloadStream(url);
+    }
     notifyListeners();
   }
 
@@ -273,17 +513,22 @@ class RadioViewModel extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    _userStopped = true;
+    _preloaded = false;
+    _reconnectTimer?.cancel();
+    _isReconnecting = false;
+    _updatePlaybackState(RadioPlaybackState.stopped);
     try {
-      await _player?.stop();
+      _player?.stop();
     } catch (e) {
       Debug.trace("Error stopping player: $e", isError: true);
     }
-    _isPlaying = false;
-    _isBuffering = false;
-    notifyListeners();
   }
 
   Future<void> disposePlayer() async {
+    _userStopped = true;
+    _reconnectTimer?.cancel();
+    _isReconnecting = false;
     _cancelSubscriptions();
     if (_player != null) {
       try {
@@ -304,6 +549,7 @@ class RadioViewModel extends ChangeNotifier {
     } catch (e) {
       Debug.trace("Error deactivating audio session: $e", isError: true);
     }
+    _updatePlaybackState(RadioPlaybackState.stopped);
   }
 
   void _cancelSubscriptions() {
@@ -318,13 +564,15 @@ class RadioViewModel extends ChangeNotifier {
   }
 
   void reset() {
+    _userStopped = true;
+    _reconnectTimer?.cancel();
+    _isReconnecting = false;
     _liveProgram = null;
     _mediaItem = null;
     _playlist = null;
     _currentStreamUrl = null;
-    _isPlaying = false;
-    _isBuffering = false;
-    notifyListeners();
+    _retryCount = 0;
+    _updatePlaybackState(RadioPlaybackState.idle);
   }
 
   Future<void> handleLogout() async {

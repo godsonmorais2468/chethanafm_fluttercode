@@ -60,9 +60,18 @@ class _HomeViewState extends State<HomeView> {
       } catch (e) {
         debugPrint("HomeView refresh error: $e");
       } finally {
+        if (mounted) {
+          setState(() {});
+        }
         _isRefreshing = false;
       }
     });
+  }
+
+  bool _isBroadcastingHours(ScheduleViewModel scheduleViewModel) {
+    final now = DateTime.now();
+    final hour = now.hour;
+    return hour >= 6 && hour < 22; // 06:00 AM to 10:00 PM
   }
 
 
@@ -84,6 +93,17 @@ class _HomeViewState extends State<HomeView> {
     } catch (_) {
       return timeStr;
     }
+  }
+
+  String _formatTitle(String title) {
+    if (title.isEmpty) return title;
+    if (title.toLowerCase() == 'songs') {
+      return 'Songs';
+    }
+    if (title.startsWith('songs')) {
+      return title.replaceFirst('songs', 'Songs');
+    }
+    return title;
   }
 
   @override
@@ -166,7 +186,10 @@ class _HomeViewState extends State<HomeView> {
                                 return const LiveRadioShimmer();
                               }
 
-                              if (homeViewModel.errorMessage != null) {
+                              if (homeViewModel.errorMessage != null &&
+                                  (homeViewModel.errorMessage!.toLowerCase().contains('internet') ||
+                                   homeViewModel.errorMessage!.toLowerCase().contains('connection') ||
+                                   homeViewModel.errorMessage!.toLowerCase().contains('server'))) {
                                 return LiveRadioError(
                                   errorMessage: homeViewModel.errorMessage!,
                                   onRetry: () {
@@ -176,14 +199,11 @@ class _HomeViewState extends State<HomeView> {
                                 );
                               }
 
-                              if (liveProgram == null) {
-                                return _buildOfflineCard(context);
-                              }
-
-                              return _buildLiveCard(
+                              return _buildPlaybackCard(
                                 context,
                                 liveProgram: liveProgram,
                                 radioViewModel: radioViewModel,
+                                scheduleViewModel: scheduleViewModel,
                                 showNextBadge: showNextBadge,
                                 minsUntilNext: minsUntilNext,
                                 nextShow: nextShow,
@@ -263,105 +283,96 @@ class _HomeViewState extends State<HomeView> {
       ),
     );
   }
-
+  
   // ── Card builders ────────────────────────────────────────────────────────
 
-  Widget _buildOfflineCard(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const SizedBox.shrink(),
-            _buildChatButton(context, liveProgram: null),
-          ],
-        ),
-        SizedBox(height: 8.h),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            "No live programme available.",
-            style: GoogleFonts.outfit(
-              fontSize: 24.sp,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-        ),
-        SizedBox(height: 2.h),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            "Offline",
-            style: GoogleFonts.outfit(
-              fontSize: 15.sp,
-              color: Colors.white70,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-        SizedBox(height: 12.h),
-      ],
-    );
-  }
-
-  Widget _buildLiveCard(
+  Widget _buildPlaybackCard(
     BuildContext context, {
-    required LiveProgram liveProgram,
+    required LiveProgram? liveProgram,
     required RadioViewModel radioViewModel,
+    required ScheduleViewModel scheduleViewModel,
     required bool showNextBadge,
     required int minsUntilNext,
     required ProgramSchedule? nextShow,
   }) {
-    final radioViewModel2 = radioViewModel;
+    final bool isLiveShow = liveProgram != null && liveProgram.isLive;
+    final bool isBroadcasting = _isBroadcastingHours(scheduleViewModel);
+
+    // Priority Order:
+    // 1. Live Show (when liveProgram != null && liveProgram.isLive)
+    // 2. Songs (when no live show running, but within 06:00 AM -> 10:00 PM broadcasting hours)
+    // 3. Off Air (when no live show running and outside broadcasting hours)
+    final bool isSongsState = !isLiveShow && (isBroadcasting || (liveProgram != null && !liveProgram.isLive));
+
+    String displayTitle;
+    String? displaySubtitle;
+    String? displayRj;
+
+    if (isLiveShow) {
+      displayTitle = _formatTitle(liveProgram.title);
+      displayRj = (liveProgram.rj.trim().isNotEmpty && liveProgram.rj.trim() != '.')
+          ? liveProgram.rj
+          : null;
+    } else if (isSongsState) {
+      displayTitle = "Songs";
+      displaySubtitle = "Enjoy our continuous music playlist.";
+    } else {
+      displayTitle = "Off Air";
+      displaySubtitle = "Tune in during our broadcasting hours.";
+    }
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            liveProgram.isLive
+            isLiveShow
                 ? const LiveBadge(isPlaying: true)
                 : const SizedBox.shrink(),
-            _buildChatButton(context, liveProgram: liveProgram),
+            _buildChatButton(context, liveProgram: isLiveShow ? liveProgram : null),
           ],
         ),
         SizedBox(height: 8.h),
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            liveProgram.title,
+            displayTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: GoogleFonts.outfit(
-              fontSize: 30.sp,
+              fontSize: 18.sp,
               fontWeight: FontWeight.bold,
               color: Colors.white,
             ),
           ),
         ),
-        SizedBox(height: 2.h),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            liveProgram.rj,
-            style: GoogleFonts.outfit(
-              fontSize: 15.sp,
-              color: Colors.white70,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-        if (!liveProgram.isLive) ...[
-          SizedBox(height: 8.h),
+        if (displayRj != null) ...[
+          SizedBox(height: 2.h),
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              "Tune in to our 24/7 automated music playlist.",
+              displayRj,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: GoogleFonts.outfit(
-                fontSize: 12.sp,
-                color: Colors.white60,
-                fontWeight: FontWeight.normal,
-                fontStyle: FontStyle.italic,
+                fontSize: 15.sp,
+                color: Colors.white70,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+        if (displaySubtitle != null) ...[
+          SizedBox(height: 4.h),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              displaySubtitle,
+              style: GoogleFonts.outfit(
+                fontSize: 13.sp,
+                color: Colors.white70,
+                fontWeight: FontWeight.w400,
               ),
             ),
           ),
@@ -378,7 +389,7 @@ class _HomeViewState extends State<HomeView> {
                   AnimatedSize(
                     duration: const Duration(milliseconds: 300),
                     curve: Curves.easeInOut,
-                    child: radioViewModel2.isPlaying
+                    child: radioViewModel.isPlaying
                         ? Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -420,14 +431,7 @@ class _HomeViewState extends State<HomeView> {
               ),
             ),
             GestureDetector(
-              onTap: () async {
-                await radioViewModel2.updateStreamUrl(
-                  liveProgram.streamUrl,
-                  title: liveProgram.title,
-                  rj: liveProgram.rj,
-                );
-                radioViewModel2.togglePlay();
-              },
+              onTap: () => radioViewModel.togglePlay(),
               child: Container(
                 width: 48.w,
                 height: 48.w,
@@ -440,7 +444,7 @@ class _HomeViewState extends State<HomeView> {
                   ),
                 ),
                 child: Center(
-                  child: radioViewModel2.isBuffering
+                  child: radioViewModel.isBuffering
                       ? SizedBox(
                           width: 24.w,
                           height: 24.w,
@@ -450,7 +454,7 @@ class _HomeViewState extends State<HomeView> {
                           ),
                         )
                       : Icon(
-                          radioViewModel2.isPlaying
+                          radioViewModel.isPlaying
                               ? Icons.pause_rounded
                               : Icons.play_arrow_rounded,
                           color: Colors.white,
@@ -612,22 +616,28 @@ class _HomeViewState extends State<HomeView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  nextShow.title,
+                  _formatTitle(nextShow.title),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.outfit(
-                    fontSize: 20.sp,
+                    fontSize: 16.sp,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
                   ),
                 ),
-                SizedBox(height: 6.h),
-                Text(
-                  nextShow.rj,
-                  style: GoogleFonts.outfit(
-                    fontSize: 13.sp,
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w500,
+                if (nextShow.rj.trim().isNotEmpty && nextShow.rj.trim() != '.') ...[
+                  SizedBox(height: 4.h),
+                  Text(
+                    nextShow.rj,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                      fontSize: 13.sp,
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
-                ),
+                ],
                 SizedBox(height: 12.h),
                 Text(
                   "${_formatTime(nextShow.startTime)} - ${_formatTime(nextShow.endTime)}",
@@ -745,7 +755,7 @@ class _HomeViewState extends State<HomeView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    s.title,
+                    _formatTitle(s.title),
                     style: GoogleFonts.outfit(
                       fontSize: 16.sp,
                       fontWeight: FontWeight.bold,
@@ -758,17 +768,20 @@ class _HomeViewState extends State<HomeView> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Expanded(
-                        child: Text(
-                          s.rj,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.outfit(
-                            fontSize: 12.sp,
-                            color: const Color(0xFF64748B),
+                      if (s.rj.trim().isNotEmpty && s.rj.trim() != '.')
+                        Expanded(
+                          child: Text(
+                            s.rj,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.outfit(
+                              fontSize: 12.sp,
+                              color: const Color(0xFF64748B),
+                            ),
                           ),
-                        ),
-                      ),
+                        )
+                      else
+                        const Spacer(),
                       Text(
                         "${_formatTime(s.startTime)} - ${_formatTime(s.endTime)}",
                         style: GoogleFonts.outfit(

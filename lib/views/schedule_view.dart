@@ -385,109 +385,52 @@ class _ScheduleViewState extends State<ScheduleView>
             Expanded(
               child: Padding(
                 padding: EdgeInsets.all(16.w),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Program thumbnail
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12.r),
-                      child: Image.asset(
-                        Images.qboxCube,
-                        width: 54.w,
-                        height: 54.w,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    SizedBox(width: 12.w),
-                    // Title + RJ
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Row(
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Program thumbnail
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12.r),
+                          child: Image.asset(
+                            Images.qboxCube,
+                            width: 50.w,
+                            height: 50.w,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        SizedBox(width: 12.w),
+                        // Title + RJ
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Flexible(
-                                child: Text(
-                                  prog.title,
-                                  style: GoogleFonts.outfit(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16.sp,
-                                    color: Colors.black,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                              Text(
+                                prog.title,
+                                style: GoogleFonts.outfit(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14.sp,
+                                  color: Colors.black,
                                 ),
                               ),
-                              if (isLive) ...[
-                                SizedBox(width: 6.w),
-                                // Pulsing LIVE badge
-                                AnimatedBuilder(
-                                  animation: _pulseAnimation,
-                                  builder: (context, _) {
-                                    return Container(
-                                      padding: EdgeInsets.symmetric(
-                                          horizontal: 8.w, vertical: 3.h),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF1DA1D8)
-                                            .withValues(
-                                                alpha: 0.10 +
-                                                    0.08 *
-                                                        _pulseAnimation.value),
-                                        borderRadius:
-                                            BorderRadius.circular(10.r),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          // Small pulsing dot
-                                          Container(
-                                            width: 5.w,
-                                            height: 5.w,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: const Color(0xFF1DA1D8)
-                                                  .withValues(
-                                                      alpha:
-                                                          _pulseAnimation.value),
-                                            ),
-                                          ),
-                                          SizedBox(width: 4.w),
-                                          Text(
-                                            "LIVE",
-                                            style: GoogleFonts.outfit(
-                                              color: const Color(0xFF1DA1D8),
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 9.sp,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
+                              if (prog.rj.trim().isNotEmpty && prog.rj.trim() != '.') ...[
+                                SizedBox(height: 2.h),
+                                Text(
+                                  prog.rj,
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 12.sp,
+                                    color: const Color(0xFF64748B),
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                               ],
                             ],
                           ),
-                          SizedBox(height: 4.h),
-                          Text(
-                            prog.rj,
-                            style: GoogleFonts.outfit(
-                              fontSize: 13.sp,
-                              color: const Color(0xFF64748B),
-                              fontWeight: FontWeight.w500,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(width: 8.w),
-                    // Time + action icon
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
+                        ),
+                        SizedBox(width: 8.w),
+                        // Time on top right corner
                         Text(
                           "${_fmt(prog.startTime)} - ${_fmt(prog.endTime)}",
                           style: GoogleFonts.outfit(
@@ -496,8 +439,57 @@ class _ScheduleViewState extends State<ScheduleView>
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        SizedBox(height: 6.h),
-                        if (isLive)
+                      ],
+                    ),
+                    if (isLive) ...[
+                      SizedBox(height: 8.h),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          // Pulsing LIVE badge
+                          AnimatedBuilder(
+                            animation: _pulseAnimation,
+                            builder: (context, _) {
+                              return Container(
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: 8.w, vertical: 3.h),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1DA1D8)
+                                      .withValues(
+                                          alpha: 0.10 +
+                                              0.08 *
+                                                  _pulseAnimation.value),
+                                  borderRadius:
+                                      BorderRadius.circular(10.r),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 5.w,
+                                      height: 5.w,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: const Color(0xFF1DA1D8)
+                                            .withValues(
+                                                alpha:
+                                                    _pulseAnimation.value),
+                                      ),
+                                    ),
+                                    SizedBox(width: 4.w),
+                                    Text(
+                                      "LIVE",
+                                      style: GoogleFonts.outfit(
+                                        color: const Color(0xFF1DA1D8),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 9.sp,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
                           GestureDetector(
                             onTap: () => radioViewModel.togglePlay(),
                             child: CircleAvatar(
@@ -512,15 +504,10 @@ class _ScheduleViewState extends State<ScheduleView>
                                 size: 16.sp,
                               ),
                             ),
-                          )
-                        else
-                          Icon(
-                            Icons.notifications_none_rounded,
-                            color: const Color(0xFF94A3B8),
-                            size: 20.sp,
                           ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),

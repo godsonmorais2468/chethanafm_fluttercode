@@ -69,6 +69,19 @@ class ScheduleViewModel extends ChangeNotifier {
     return null;
   }
 
+  bool get isWithinScheduledBroadcastHours {
+    final shows = todaySchedules;
+    if (shows.isEmpty) return true;
+    final now = currentTime;
+    int earliest = _toMinutes(shows.first.startTime);
+    int latest = 0;
+    for (var s in shows) {
+      int end = _toMinutes(s.endTime);
+      if (end > latest) latest = end;
+    }
+    return now >= earliest && now < latest;
+  }
+
   List<ProgramSchedule> get upcomingShows {
     final now = currentTime;
     return todaySchedules.where((s) {
